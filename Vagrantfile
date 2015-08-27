@@ -7,77 +7,79 @@ Vagrant.configure(2) do |config|
   #config.vm.network "forwarded_port", guest: 80, host: 8080
   #config.vm.synced_folder "../data", "/vagrant_data"
 
+  config.vm.provider "virtualbox" do |vb|
+    vb.memory = "1024"
+  end
+
   config.vm.provision "shell", inline: <<-SHELL
     set -x
-    yum update -y && yum upgrade -y
-    yum install -y vim bacula-client
+    set -e
+    cp /vagrant/bareos.repo /etc/yum.repos.d/bareos.repo
+    yum update -y
+    yum upgrade -y
+    yum install -y vim
   SHELL
 
-  config.vm.define "server", primary: true do |s|
-    s.vm.hostname = 'bacula-server'
-    s.vm.network "private_network", ip: "192.168.111.10"
+  config.vm.define 'bareos-dir', primary: true do |s|
+    s.vm.hostname = 'backup-dir'
+    s.vm.network "private_network", ip: '192.168.111.10'
     s.vm.provision "shell", inline: <<-SHELL
-      yum install -y bacula-director bacula-storage bacula-console postgresql-server
-      if [[ ! -f /etc/postgres-inited ]]; then
+      yum install -y bareos bareos-database-postgresql postgresql-server
+      postgresql-setup initdb
+      systemctl enable postgresql
+      systemctl start postgresql
 
-        postgresql-setup initdb
-        sed -i "s/local   all             all                                     peer/local   all             all                                     peer\\nhost    bacula          bacula          127.0.0.1\\/32            md5\\nhost    bacula          bacula          ::1\\/128                 md5/" /var/lib/pgsql/data/pg_hba.conf
-        systemctl restart postgresql
+      if [[ ! -f /etc/bareos-inited ]]; then
+        . /usr/lib/bareos/scripts/bareos-config-lib.sh
 
-        PG_BACULA_PASSWORD=`date +%s | sha256sum | base64 | head -c 33`
-        su - postgres <<EOF
-/usr/libexec/bacula/create_postgresql_database
-/usr/libexec/bacula/make_postgresql_tables
-/usr/libexec/bacula/grant_postgresql_privileges
-psql bacula -c "alter user bacula with password '$PG_BACULA_PASSWORD'"
-EOF
+        db_name="${db_name:-`get_database_name bareos`}"
+	db_user="${db_user:-`get_database_user bareos`}"
+	dir_user=`get_user_dir`
+	dir_group=`get_group_dir`
+	default_db_type=`get_database_driver_default`
+        working_dir=`get_working_dir`
 
-          echo "localhost:5432:bacula:bacula:"$PG_BACULA_PASSWORD > /var/spool/bacula/.pgpass 
-        chown bacula:bacula /var/spool/bacula/.pgpass
-        chmod 600 /var/spool/bacula/.pgpass
-        systemctl restart postgresql
-        touch /etc/postgres-inited
+        PSQLVERSION=`su - postgres -c "psql -d template1 -c 'SELECT version()' 2>/dev/null" | \
+                     awk '/PostgreSQL/ { print $2 }' | \
+                     cut -d '.' -f 1,2`
+
+        if [ -z "${PSQLVERSION}" ]; then
+          echo "Unable to determine PostgreSQL version."
+          exit 1
+        fi
+
+        ENCODING="ENCODING 'SQL_ASCII' LC_COLLATE 'C' LC_CTYPE 'C'"
+
+        su - postgres -c <<END
+psql -f - -d template1 $* <<END2
+\set ON_ERROR_STOP on
+CREATE DATABASE ${db_name} $ENCODING TEMPLATE template0;
+ALTER DATABASE ${db_name} SET datestyle TO 'ISO, YMD';
+END2
+END
+
+        if su - postgres -c 'psql -l ${dbname}' | grep " ${db_name}.*SQL_ASCII" >/dev/null; then
+          echo "Database encoding OK"
+        else
+          echo "Database encoding bad. Do not use this database"
+        fi
+
+        su - postgres -c /usr/bin/env db_name=bareos db_user=beros /usr/lib/bareos/scripts/make_bareos_tables postgresql
+        /usr/lib/bareos/scripts/grant_bareos_privileges
+        touch /etc/bareos-inited
       fi
 
-      if [[ ! -f /etc/bacula-inited ]]; then
-        #  make sure .conf files are in same directory as Vagrantfile
-        mkdir /etc/bacula/examples/
-        cp /etc/bacula/*.conf /etc/bacula/examples/.
-        cp /vagrant/*.conf /etc/bacula/.
-        chown -R root:root /etc/bacula
-        chmod 755 /etc/bacula
-        chmod 640 /etc/bacula/*
-        chgrp bacula /etc/bacula/bacula-dir.conf /etc/bacula/query.sql
-        #  Setting rights - http://www.backupcentral.com/phpBB2/two-way-mirrors-of-external-mailing-lists-3/bacula-25/permission-problem-on-centos-6-5-and-bacula-7-125732/ 
-      
-        #  Set Bacula Component Passwords
-        #  https://www.digitalocean.com/community/tutorials/how-to-install-bacula-server-on-centos-7
-        sed -i "s/@@FD_PASSWORD@@/N2I3NzNmYTg3YzMwOWMzN2NhOTljNmMzY/g" /etc/bacula/bacula-dir.conf
-        sed -i "s/@@FD_PASSWORD@@/N2I3NzNmYTg3YzMwOWMzN2NhOTljNmMzY/g" /etc/bacula/bacula-fd.conf
-        DIR_PASSWORD=`date +%s | sha256sum | base64 | head -c 33`
-        sed -i "s/@@DIR_PASSWORD@@/$DIR_PASSWORD/g" /etc/bacula/bacula-dir.conf
-        sed -i "s/@@DIR_PASSWORD@@/$DIR_PASSWORD/g" /etc/bacula/bconsole.conf
-        SD_PASSWORD=`date +%s | sha256sum | base64 | head -c 33`
-        sed -i "s/@@SD_PASSWORD@@/$SD_PASSWORD/g" /etc/bacula/bacula-dir.conf
-        sed -i "s/@@SD_PASSWORD@@/$SD_PASSWORD/g" /etc/bacula/bacula-sd.conf
+      systemctl start bareos-dir
+      systemctl start bareos-sd
+      systemctl start bareos-fd
 
-        # script folder does not exist
-        mkdir -p /bacula/backup /bacula/restore
-        chown -R bacula:bacula /bacula
-        chmod -R 700 /bacula
-        touch /etc/bacula-inited
-      fi
-
-      systemctl restart bacula-sd bacula-fd bacula-dir
-      systemctl enable bacula-sd bacula-fd bacula-dir
-
-      #  bconsole: label ... MyVolume, 2, ...
-      #  run
+      # TODO: open ports 9101, 9102, 9103 in FW
+      # tail -f /var/log/bareos/bareos.log
     SHELL
   end
 
-  config.vm.define "client1" do |c|
-    c.vm.hostname = 'bacula-client1'
+  config.vm.define 'client-1' do |c|
+    c.vm.hostname = 'client-1'
     c.vm.network "private_network", ip: "192.168.111.11"
     c.vm.provision "shell", inline: <<-SHELL
       if [[ $(getent passwd eventstore >/dev/null) -ne 0 ]]; then
@@ -89,46 +91,22 @@ EOF
           chmod -R 755 /var/lib/eventstore
           touch /etc/sysconfig/eventstore
       fi
-      if [[ ! -f /etc/client-inited ]]; then
-        #  make sure .conf files are in same directory as Vagrantfile
-        mkdir /etc/bacula/examples/
-        cp /etc/bacula/bacula-fd.conf /etc/bacula/examples/.
-        cp /vagrant/bacula-fd.client1_conf /etc/bacula/bacula-fd.conf
-        sed -i "s/@@FD_PASSWORD@@/N2I3NzNmYTg3YzMwOWMzN2NhOTljNmMzY/" /etc/bacula/bacula-fd.conf
-        mkdir -p /bacula/restore
-        chown -R bacula:bacula /bacula
-        chmod -R 700 /bacula
-        touch /etc/client-inited
-      fi
-      systemctl restart bacula-fd
     SHELL
   end
 
-  config.vm.define "client2" do |c|
-    c.vm.hostname = 'bacula-client2'
+  config.vm.define 'client-2' do |c|
+    c.vm.hostname = 'client-2'
     c.vm.network "private_network", ip: "192.168.111.12"
     c.vm.provision "shell", inline: <<-SHELL
-      # Create eventstore
-      if [[ $(getent passwd eventstore >/dev/null) -ne 0 ]]; then
-        mkdir -p /var/lib/eventstore && \
-          groupadd -r eventstore && \
-          useradd -d /var/lib/eventstore -r -g eventstore eventstore && \
-          chown -R eventstore:eventstore /var/lib/eventstore && \
-          chmod -R 755 /var/lib/eventstore
-          touch /etc/sysconfig/eventstore
+      # Create consul dir
+      if [[ $(getent passwd consul >/dev/null) -ne 0 ]]; then
+        mkdir -p /var/lib/consul && \
+          groupadd -r consul && \
+          useradd -d /var/lib/consul -r -g consul consul && \
+          chown -R consul:consul /var/lib/consul && \
+          chmod -R 755 /var/lib/consul
+          touch /etc/sysconfig/consul
       fi
-      if [[ ! -f /etc/client-inited ]]; then
-        #  make sure .conf files are in same directory as Vagrantfile
-        mkdir /etc/bacula/examples/
-        cp /etc/bacula/bacula-fd.conf /etc/bacula/examples/.
-        cp /vagrant/bacula-fd.client2_conf /etc/bacula/bacula-fd.conf
-        sed -i "s/@@FD_PASSWORD@@/N2I3NzNmYTg3YzMwOWMzN2NhOTljNmMzY/" /etc/bacula/bacula-fd.conf
-        mkdir -p /bacula/restore
-        chown -R bacula:bacula /bacula
-        chmod -R 700 /bacula
-        touch /etc/client-inited
-      fi
-      systemctl restart bacula-fd
     SHELL
   end
 end
