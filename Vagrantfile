@@ -69,7 +69,7 @@ EOF
       fi
 
       systemctl restart bacula-sd bacula-fd bacula-dir
-      systemctl enable bacula-sd bacula-fd bacula-dir
+      systemctl enable bacula-sd bacula-fd bacula-dir postgresql
 
       #  bconsole: label ... MyVolume, 2, ...
       #  run
@@ -101,6 +101,7 @@ EOF
         touch /etc/client-inited
       fi
       systemctl restart bacula-fd
+      systemctl enable bacula-fd
     SHELL
   end
 
@@ -129,6 +130,7 @@ EOF
         touch /etc/client-inited
       fi
       systemctl restart bacula-fd
+      systemctl enable bacula-fd
     SHELL
   end
 end
