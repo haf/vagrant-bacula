@@ -41,7 +41,7 @@ EOF
 
       if [[ ! -f /etc/bacula-inited ]]; then
         #  make sure .conf files are in same directory as Vagrantfile
-        mkdir /etc/bacula/examples/
+        mkdir -p /etc/bacula/examples/
         cp /etc/bacula/*.conf /etc/bacula/examples/.
         cp /vagrant/*.conf /etc/bacula/.
         chown -R root:root /etc/bacula
@@ -82,16 +82,16 @@ EOF
     c.vm.provision "shell", inline: <<-SHELL
       if [[ $(getent passwd eventstore >/dev/null) -ne 0 ]]; then
         # Create eventstore
-        mkdir -p /var/lib/eventstore && \
-          groupadd -r eventstore && \
-          useradd -d /var/lib/eventstore -r -g eventstore eventstore && \
-          chown -R eventstore:eventstore /var/lib/eventstore && \
-          chmod -R 755 /var/lib/eventstore
-          touch /etc/sysconfig/eventstore
+        mkdir /var/lib/eventstore
+        groupadd -r eventstore
+        useradd -d /var/lib/eventstore -r -g eventstore eventstore
+        chown -R eventstore:eventstore /var/lib/eventstore
+        chmod -R 755 /var/lib/eventstore
+        touch /etc/sysconfig/eventstore
       fi
       if [[ ! -f /etc/client-inited ]]; then
         #  make sure .conf files are in same directory as Vagrantfile
-        mkdir /etc/bacula/examples/
+        mkdir -p /etc/bacula/examples/
         cp /etc/bacula/bacula-fd.conf /etc/bacula/examples/.
         cp /vagrant/bacula-fd.client1_conf /etc/bacula/bacula-fd.conf
         sed -i "s/@@FD_PASSWORD@@/N2I3NzNmYTg3YzMwOWMzN2NhOTljNmMzY/" /etc/bacula/bacula-fd.conf
@@ -111,16 +111,16 @@ EOF
     c.vm.provision "shell", inline: <<-SHELL
       # Create eventstore
       if [[ $(getent passwd eventstore >/dev/null) -ne 0 ]]; then
-        mkdir -p /var/lib/eventstore && \
-          groupadd -r eventstore && \
-          useradd -d /var/lib/eventstore -r -g eventstore eventstore && \
-          chown -R eventstore:eventstore /var/lib/eventstore && \
-          chmod -R 755 /var/lib/eventstore
-          touch /etc/sysconfig/eventstore
+        mkdir -p /var/lib/eventstore
+        groupadd -r eventstore
+        useradd -d /var/lib/eventstore -r -g eventstore eventstore
+        chown -R eventstore:eventstore /var/lib/eventstore
+        chmod -R 755 /var/lib/eventstore
+        touch /etc/sysconfig/eventstore
       fi
       if [[ ! -f /etc/client-inited ]]; then
         #  make sure .conf files are in same directory as Vagrantfile
-        mkdir /etc/bacula/examples/
+        mkdir -p /etc/bacula/examples/
         cp /etc/bacula/bacula-fd.conf /etc/bacula/examples/.
         cp /vagrant/bacula-fd.client2_conf /etc/bacula/bacula-fd.conf
         sed -i "s/@@FD_PASSWORD@@/N2I3NzNmYTg3YzMwOWMzN2NhOTljNmMzY/" /etc/bacula/bacula-fd.conf
