@@ -2,7 +2,7 @@
 # vi: set ft=ruby :
 
 Vagrant.configure(2) do |config|
-  config.vm.box = "chef/centos-7.1"
+  config.vm.box = "centos/7"
   config.vm.box_check_update = true
   #config.vm.network "forwarded_port", guest: 80, host: 8080
   #config.vm.synced_folder "../data", "/vagrant_data"
